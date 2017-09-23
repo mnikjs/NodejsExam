@@ -4,7 +4,7 @@ exports.abs = function (number){
 	}else{
 		return -number;
 	}
-}
+};
 
 exports.circleArea = function (radius){
 	return radius*radius*Math.PI;
