@@ -19,3 +19,11 @@ console.log('obj='+obj);
 var module = require('./module.js');
 console.log('abs(-273)=%d', module.abs(-273));
 console.log('circleArea(3)=%d', module.circleArea(3));
+
+var url = require('url');
+var parsedObject = url.parse('http://www.hanbit.co.kr/store/books/look.php?p_code=B4250257160');
+console.log(parsedObject.query);
+
+var querystring = require('querystring');
+console.log(querystring.parse(parsedObject.query));
+
