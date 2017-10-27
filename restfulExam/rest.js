@@ -4,6 +4,11 @@ var app = express();
 app.use(bodyParser.urlencoded({extended:false}));
 app.use(express.static(__dirname+'/public'));//static 미들웨어
 
+//크로스도메인 이슈 대응(CORS)
+var cors = require('cors')();
+app.use(cors);
+//npm install core 실행
+
 var mysql = require('mysql');
 var connection = mysql.createConnection({
   host     : 'localhost',
@@ -20,7 +25,33 @@ MongoClient.connect(url, function(err, db) {
 	console.log("Connected correctly to server");
 	dbObj=db;
 });
-
+////////////////////////////////////////////////
+var multer = require('multer');
+var Storage = multer.diskStorage({
+     destination: function(req, file, callback) {
+         callback(null, "./public/upload_image/");
+     },
+     filename: function(req, file, callback) {
+     		file.uploadedFile = file.fieldname + "_" + 
+     			Date.now() + "_" + file.originalname;
+     		console.log('file.uploadedFile:'+file.uploadedFile);
+         callback(null, file.uploadedFile);
+     }
+ });
+ var upload = multer({
+     storage: Storage
+ }).single("image");
+app.post('/user/picture',function(req, res) {
+	upload(req, res, function(err) {
+		if (err) {
+			res.send(JSON.stringify(err));
+		} else {
+			res.send(JSON.stringify({url:req.file.uploadedFile,
+				description:req.body.description}));
+		}
+	});
+});
+////////////////////////////////////////////////
 app.get('/user/message', function(req,res){
 	console.log(req.query.sender_id);
 	var condition ={};
@@ -109,6 +140,7 @@ app.get('/user', function(req,res){
 			if(err){
 				res.send(JSON.stringify(err));
 			}else{
+				console.log(JSON.stringify(results))
 				res.send(JSON.stringify(results));
 			}
 		});
@@ -122,8 +154,9 @@ app.get('/user/:id', function(req,res){
 				res.send(JSON.stringify(err));
 			}else{
 				if(results.length > 0){
-					results[0].city = '서울';
-					res.send(JSON.stringify(results));
+					//console.log("111="+JSON.stringify(results));
+					//console.log("222="+JSON.stringify(results[0]));
+					res.send(JSON.stringify(results[0]));
 				}else{
 					res.send(JSON.stringify({}));
 				}
@@ -143,15 +176,18 @@ app.get('/user/:id', function(req,res){
 		res.send(JSON.stringify(users[select_index]));
 	}*/
 });
+var crypto = require('crypto');
 app.post('/user', function(req,res){
+	var password = req.body.password;
+	var hash = crypto.createHash('sha256').update(password).digest('base64');
 	connection.query(
-		'insert into user(name,age) values(?,?)',
-		[req.body.name, req.body.age],
-		function(err, results){
+		'insert into user(user_id, password, name,age) values(?,?,?,?)',
+		[req.body.user_id, hash, req.body.name, req.body.age],
+		function(err, result){
 			if(err){
 				res.send(JSON.stringify(err));
 			}else{
-				res.send(JSON.stringify(results));
+				res.send(JSON.stringify(result));
 			}
 		});
 	/*var name = req.body.name;
@@ -160,17 +196,71 @@ app.post('/user', function(req,res){
 	users.push(obj);
 	res.send(JSON.stringify({result:true, api:'add user info'}));*/
 });
+var jwt = require('json-web-token');
+app.post('/user/login', function(req,res){
+	var password = req.body.password;
+	var hash = crypto.createHash('sha256').update(password).digest('base64');
+	connection.query(
+		'select id from user where user_id=? and password=?',
+		[req.body.user_id, hash],
+		function(err, results, fields){
+			if(err){
+				res.send(JSON.stringify(err));
+			}else{
+				if(results.length > 0){//조건만족->로그인성공
+					var cur_date = new Date();
+					var settingAddHeaders = {
+						payload:{
+							"iss":"shinhan",
+							"aud":"mobile",
+							"iat":cur_date.getTime(),
+							"typ":"/online/transactionstauts/v2",
+							"request":{
+								"myTransactionId":req.body.user_id,
+								"merchantTransactionId":hash,
+								"status":"SUCCESS"
+							}
+						},
+						header:{
+							kid:'abcdefghijklmnopqrstuvwxyz1234567890'
+						}
+					};
+					var secret = "SHINHANMOBILETOPSECRET!!!!!!!!";
+					jwt.encode(secret, settingAddHeaders,
+						function(err, token){
+							if(err){
+								res.send(JSON.stringify(err));
+							}else{
+								var tokens = token.split(".");
+								connection.query(
+									'insert into user_login(token, user_real_id) values(?,?)',
+									[tokens[2], results[0].id],
+									function(err, result){
+										if(err){
+											res.send(JSON.stringify(err));
+										}else{
+											res.send(JSON.stringify({result:true, token:tokens[2], db_result:result}));
+										}
+									});
+							}
+						});
+				}else{//조건불만족->로그인실패
+					res.send(JSON.stringify({result:false}));
+				}
+			}
+		});
+});
 app.put('/user/:id', function(req,res){
-	connect.query(
+	connection.query(
 		'update user set name=?, age=? where id=?',
 		[req.body.name, req.body.age, req.params.id],
-		function(req, results){
+		function(err, result){
 			if(err){
 				res.send(JSON.stringify(err));
 			}else{
 				res.send(JSON.stringify(result));
 			}
-		});
+		})
 	/*var select_index = -1;
 	for(var i=0 ; i<users.length ; i++){
 		var obj = users[i];
@@ -193,7 +283,7 @@ app.delete('/user/:id', function(req,res){
 	connection.query(
 		'delete from user where id=?',
 		[req.params.id],
-		function(err, results){
+		function(err, result){
 			if(err){
 				res.send(JSON.stringify(err));
 			}else{
